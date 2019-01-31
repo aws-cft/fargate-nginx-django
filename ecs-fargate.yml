@@ -1,0 +1,285 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "test for route 53"
+
+Parameters:
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select atleast two private subnets in your selected VPC.
+  VpcId:
+    Type: String
+    Description: "Id of the VPC to use"
+    Default: vpc-9d0af6e5
+
+  REASACAvadevtest:
+    Type: String
+    Description: "Name of the cluster"
+
+  TaskDefinitionExecutionRoleARN:
+    Type: String
+    Description: "ecs task execution arn"  #
+    Default: arn:aws:iam::563878617367:role/ecsTaskExecutionRole
+
+  REASACAvaNginxBE:
+    Type: String
+    Description: "docker image for the ava be service"
+    Default: 563878617367.dkr.ecr.us-west-2.amazonaws.com/web
+
+  REASACAvaFrontEndAppImage:
+    Type: String
+    Description: "docker image for the ava fe service"
+    Default: 563878617367.dkr.ecr.us-west-2.amazonaws.com/nginx
+
+  AVALogGroup:
+    Type: String
+    Description: "log grp name of the service"
+    Default: ava-test
+
+    
+Resources:
+
+  REASACAvadevtestcluster:
+    Type: "AWS::ECS::Cluster"
+    Properties:
+      ClusterName: !Ref REASACAvadevtest
+
+  REASACAVAEcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS Security Group
+      VpcId: !Ref 'VpcId'
+      SecurityGroupIngress:
+          - CidrIp: 0.0.0.0/0
+            IpProtocol: -1
+  REASACAVAEcsSecurityGroupALBports:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'REASACAVAEcsSecurityGroup'
+      IpProtocol: -1
+      SourceSecurityGroupId: !Ref 'REASACAVAEcsSecurityGroup'
+  REACAVAFrontEndTG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: REASACAVAFRONTENDALB
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Name: reasac-ava-frontend-tg-devtest
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref 'VpcId'
+      TargetType: ip
+
+  REASACAVAFrontEndALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - REASACAVAFRONTENDALB
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'REACAVAFrontEndTG'
+          Type: forward
+      LoadBalancerArn: !Ref 'REASACAVAFRONTENDALB'
+      Port: '80'
+      Protocol: HTTP
+      # Certificates:
+      #   - CertificateArn: !Ref 'AvaSslCert'
+  REASACAVAFrontEndALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    DependsOn: REASACAVAFrontEndALBListener
+    Properties:
+      Actions:
+      - TargetGroupArn: !Ref 'REACAVAFrontEndTG'
+        Type: forward
+      Conditions:
+        - Field: path-pattern
+          Values: [/]
+      ListenerArn: !Ref 'REASACAVAFrontEndALBListener'
+      Priority: 1
+
+  REASACAVAFRONTENDALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: reasac-ava-frontend-alb-devtest
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '30'
+      Subnets: !Ref 'SubnetIds'
+      SecurityGroups: [!Ref 'REASACAVAEcsSecurityGroup']
+
+
+  REACAVANginxBackEndTG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: REASACAVANGINXBACKENDALB
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Name: reasac-ava-nbe-tg-devtest
+      Port: 8080
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref 'VpcId'
+      TargetType: ip
+
+  REASACAVANginxBackEndALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - REASACAVANGINXBACKENDALB
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'REACAVANginxBackEndTG'
+          Type: forward
+      LoadBalancerArn: !Ref 'REASACAVANGINXBACKENDALB'
+      Port: '80'
+      Protocol: HTTP
+      # Certificates:
+      #   - CertificateArn: !Ref 'AvaSslCert'
+  REASACAVANginxBackEndALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    DependsOn: REASACAVANginxBackEndALBListener
+    Properties:
+      Actions:
+      - TargetGroupArn: !Ref 'REACAVANginxBackEndTG'
+        Type: forward
+      Conditions:
+        - Field: path-pattern
+          Values: [/]
+      ListenerArn: !Ref 'REASACAVANginxBackEndALBListener'
+      Priority: 1
+
+  REASACAVANGINXBACKENDALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: reasac-ava-alb-nbe-devtest
+      Scheme: internal
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '30'
+      Subnets: !Ref 'SubnetIds'
+      SecurityGroups: [!Ref 'REASACAVAEcsSecurityGroup']
+      
+  avabackendhostedzone: 
+    Type: "AWS::Route53::HostedZone"
+    Properties: 
+      HostedZoneConfig: 
+        Comment: "Hosted zone for AVA backend devtest env"
+      Name: "ava-be-devtest.cbre.com"
+      VPCs: 
+        - 
+          VPCId: !Ref 'VpcId'
+          VPCRegion: !Ref AWS::Region
+      HostedZoneTags: 
+        - 
+          Key: "App"
+          Value: "AVA"
+        - 
+          Key: "BusinessTower"
+          Value: "AS"
+          
+  avabackendrecordset:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneName: ava-be-devtest.cbre.com.
+      Comment: Alias targeted to Network LoadBalancer for test ava.
+      RecordSets:
+      - Name: ava-be-devtest.cbre.com.
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt REASACAVANGINXBACKENDALB.CanonicalHostedZoneID
+          DNSName: !GetAtt REASACAVANGINXBACKENDALB.DNSName
+
+  REASACAAVANginxBETaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Cpu: '256'
+      Memory: '512'
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: 'awsvpc'
+      ExecutionRoleArn: !Ref TaskDefinitionExecutionRoleARN
+      ContainerDefinitions:
+        - Name: 'reasac-ava-nginx-be'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              'awslogs-region': !Ref 'AWS::Region'
+              'awslogs-group': !Ref AVALogGroup
+              'awslogs-stream-prefix': !Ref 'AWS::StackName'
+          Image: !Ref REASACAvaNginxBE
+          Essential: 'true'
+          PortMappings:
+          - ContainerPort: 8080
+
+  REASAVANginxBEService:
+    Type: "AWS::ECS::Service"
+    DependsOn: REASACAVANginxBackEndALBListener   ### changed the ALB target grp for devtest
+    Properties:
+      Cluster: !Ref REASACAvadevtestcluster
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      LoadBalancers:
+      - ContainerName: reasac-ava-nginx-be
+        ContainerPort: 8080
+        TargetGroupArn: !Ref 'REACAVANginxBackEndTG'
+      DesiredCount: 1
+      LaunchType: FARGATE
+      ServiceName: 'reasac-ava-nginx-be'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref 'REASACAVAEcsSecurityGroup'
+          Subnets: !Ref 'SubnetIds'
+          AssignPublicIp: ENABLED
+      TaskDefinition: !Ref REASACAAVANginxBETaskDefinition
+
+  REASACAAVAFrontEndAppTaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Cpu: '256'
+      Memory: '512'
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: 'awsvpc'
+      ExecutionRoleArn: !Ref TaskDefinitionExecutionRoleARN
+      ContainerDefinitions:
+        - Name: 'reasac-ava-frontend-app'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              'awslogs-region': !Ref 'AWS::Region'
+              'awslogs-group': !Ref AVALogGroup
+              'awslogs-stream-prefix': !Ref 'AWS::StackName'
+          Image: !Ref REASACAvaFrontEndAppImage
+          Essential: 'true'
+          PortMappings:
+          - ContainerPort: 80 # if you change this, you also must change the AWS::ECS::Service
+
+
+  REASAVAFrontEndApp:
+    Type: "AWS::ECS::Service"
+    DependsOn: REASACAVAFrontEndALBListener
+    Properties:
+      Cluster: !Ref REASACAvadevtestcluster
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      LoadBalancers:
+      - ContainerName: reasac-ava-frontend-app
+        ContainerPort: 80
+        TargetGroupArn: !Ref 'REACAVAFrontEndTG'
+      DesiredCount: 1
+      LaunchType: FARGATE
+      ServiceName: 'reasac-ava-frontend-app'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref 'REASACAVAEcsSecurityGroup'
+          Subnets: !Ref 'SubnetIds'
+          AssignPublicIp: ENABLED
+      TaskDefinition: !Ref REASACAAVAFrontEndAppTaskDefinition
